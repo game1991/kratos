@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 type Status uint8
@@ -20,28 +21,31 @@ type Health struct {
 	status   Status
 	checkers map[string]Checker
 	rwLock   sync.RWMutex
+	timeout  time.Duration
 }
 
 func (h *Health) HealthCheckAll(ctx context.Context) (Result, error) {
 	r := Result{
-		Status:  h.status,
-		Details: make([]ComponentResult, 0, len(h.checkers)),
+		Status:     h.status,
+		Components: make(map[string]ComponentResult),
 	}
-	lock := sync.Mutex{}
 
-	var wg sync.WaitGroup
-	wg.Add(len(h.checkers))
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
 
 	h.rwLock.RLock()
 	defer h.rwLock.RUnlock()
 	for component, checker := range h.checkers {
-		go func(component string, checker Checker) {
+		wg.Add(1)
+		go func(ctx context.Context, component string, checker Checker) {
 			defer wg.Done()
-			cr := h.check(ctx, component, checker)
-			lock.Lock()
-			r.Details = append(r.Details, cr)
-			lock.Unlock()
-		}(component, checker)
+			res := h.check(ctx, checker)
+			mu.Lock()
+			r.Components[component] = res
+			mu.Unlock()
+		}(ctx, component, checker)
 	}
 	wg.Wait()
 	return r, nil
@@ -51,27 +55,41 @@ func (h *Health) HealthCheckOne(ctx context.Context, component string) (Componen
 	h.rwLock.RLock()
 	checker, ok := h.checkers[component]
 	h.rwLock.RUnlock()
-	if !ok || checker == nil {
+	if !ok {
 		return ComponentResult{}, ErrComponentNotFound
 	}
 
-	return h.check(ctx, component, checker), nil
+	return h.check(ctx, checker), nil
 }
 
-func (h *Health) check(ctx context.Context, component string, c Checker) ComponentResult {
-	details, err := c.Check(ctx)
-	if err != nil {
-		return ComponentResult{
-			Name:     component,
-			Status:   Down,
-			ErrorMsg: err.Error(),
-			Details:  details,
+func (h *Health) check(ctx context.Context, checker Checker) ComponentResult {
+	resCh := make(chan ComponentResult, 1)
+	defer close(resCh)
+	go func() {
+		c := ComponentResult{}
+		details, err := checker.Check(ctx)
+		if err != nil {
+			c = ComponentResult{
+				Status:  Down,
+				Err:     err,
+				Details: details,
+			}
+		} else {
+			c = ComponentResult{
+				Status:  Up,
+				Err:     nil,
+				Details: details,
+			}
 		}
-	}
-	return ComponentResult{
-		Name:     component,
-		Status:   Up,
-		ErrorMsg: "",
-		Details:  details,
+		resCh <- c
+	}()
+	select {
+	case <-time.After(h.timeout):
+		return ComponentResult{
+			Status: Down,
+			Err:    context.DeadlineExceeded,
+		}
+	case res := <-resCh:
+		return res
 	}
 }

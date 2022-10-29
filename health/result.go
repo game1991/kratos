@@ -1,13 +1,12 @@
 package health
 
 type ComponentResult struct {
-	Name     string
 	Status   Status
-	ErrorMsg string
+	Err error
 	Details  map[string]interface{}
 }
 
 type Result struct {
-	Status  Status
-	Details []ComponentResult
+	Status     Status
+	Components map[string]ComponentResult
 }
