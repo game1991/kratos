@@ -7,9 +7,11 @@ require (
 	github.com/go-kratos/aegis v0.1.2
 	github.com/go-playground/form/v4 v4.2.0
 	github.com/golang-jwt/jwt/v4 v4.4.1
+	github.com/google/cel-go v0.12.5
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/imdario/mergo v0.3.12
+	go.etcd.io/etcd v3.3.27+incompatible
 	go.opentelemetry.io/otel v1.7.0
 	go.opentelemetry.io/otel/sdk v1.7.0
 	go.opentelemetry.io/otel/trace v1.7.0
